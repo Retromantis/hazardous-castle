@@ -8,7 +8,6 @@ game_scene = new MiScene();
 const TYPE_BG = 0;
 const TYPE_LADDER = 1;
 
-
 game_scene.preload = function () {
     this.loadImage('top_ground', 'assets/images/game/top_ground.png');
     this.loadImage('bottom_ground', 'assets/images/game/bottom_ground.png');
@@ -18,17 +17,6 @@ game_scene.preload = function () {
 }
 
 game_scene.create = function () {
-
-    this.map = [
-        { bg: 0, entities: [] },
-        { bg: 1, entities: [] },
-        { bg: 2, entities: [{ type: TYPE_LADDER, x: 140, y: 0 }] },
-        { bg: 2, entities: [{ type: TYPE_LADDER, x: 8, y: 0 }] },
-        { bg: 2, entities: [{ type: TYPE_LADDER, x: 140, y: 0 }] },
-        { bg: 2, entities: [{ type: TYPE_LADDER, x: 8, y: 0 }] },
-        { bg: 2, entities: [{ type: TYPE_LADDER, x: 140, y: 0 }] },
-        { bg: 0, entities: [{ type: TYPE_LADDER, x: 8, y: 0 }] }
-    ];
 
     this.FLOOR_HEIGHT = 48;
 
@@ -74,8 +62,8 @@ game_scene.player_update = function () {
     this.move(this.vx, this.vy);
     if (this.jumping) {
         this.vy += game_scene.PLAYER_JUMP_GRAVITY;
-        if (this.y >= this.last_y) {
-            this.y = this.last_y;
+        if (this.y >= this.START_Y) {
+            this.y = this.START_Y;
             this.vy = 0;
             this.jumping = false;
         }
@@ -87,8 +75,8 @@ game_scene.player_update = function () {
             if (this.scroll_remain > 0) {
                 // let scroll_amount = Math.min(this.scroll_remain, game_scene.PLAYER_SPEED);
                 game_scene.layer.move(0, this.scroll_remain);
-                game_scene.y_position += this.scroll_remain;
-                this.scroll_remain = 0;
+                game_scene.top_floor_y += this.scroll_remain;
+                // this.scroll_remain = 0;
             }
             this.dir = this.lastdir;
             this.vy = 0;
@@ -100,16 +88,21 @@ game_scene.player_update = function () {
         }
         // console.log("Climbing... " + this.distance_to_climb);
         game_scene.layer.move(0, game_scene.PLAYER_SPEED);
-        game_scene.y_position += game_scene.PLAYER_SPEED;
+        game_scene.top_floor_y += game_scene.PLAYER_SPEED;
 
-        if (game_scene.y_position >= 0) {
+        if (game_scene.top_floor_y >= 0) {
+            if (this.scroll_remain > 0) {
+                game_scene.layer.position(0, game_scene.last_layer_y + game_scene.FLOOR_HEIGHT);
+                this.position(this.x, this.START_Y);
+            }
+            game_scene.top_floor_y = 0;
             game_scene.remove_floor();
             let new_floor = game_scene.spawn_floor();
             game_scene.add_floor(new_floor, -game_scene.FLOOR_HEIGHT);
-            game_scene.y_position -= game_scene.FLOOR_HEIGHT;
+            game_scene.top_floor_y -= game_scene.FLOOR_HEIGHT;
             game_scene.layer.remove(game_scene.player);
             game_scene.layer.add(game_scene.player);
-            // console.log("Spawn new floor " + game_scene.y_position);
+            // console.log("Spawn new floor " + game_scene.top_floor_y);
         }
 
         return;
@@ -140,24 +133,26 @@ game_scene.start = function () {
     this.layer.position(0, -this.FLOOR_HEIGHT);
 
     this.floors = [];
-    this.y_position = GAME_HEIGHT - 32
+    let nFloors = Math.floor(GAME_HEIGHT / this.FLOOR_HEIGHT);
+    this.top_floor_y = nFloors * this.FLOOR_HEIGHT;
+
     this.ladder_dir = DIR_NONE;
 
-    this.add_floor({ bg: 0, entities: [] }, this.y_position);
-    this.y_position -= this.FLOOR_HEIGHT;
-    this.add_floor({ bg: 1, entities: [] }, this.y_position);
-    this.y_position -= this.FLOOR_HEIGHT;
+    this.add_floor({ bg: 0, entities: [] }, this.top_floor_y);
+    this.top_floor_y -= this.FLOOR_HEIGHT;
+    this.add_floor({ bg: 1, entities: [] }, this.top_floor_y);
+    this.top_floor_y -= this.FLOOR_HEIGHT;
 
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < nFloors; i++) {
         let floor_data = this.spawn_floor();
-        this.add_floor(floor_data, this.y_position);
-        this.y_position -= this.FLOOR_HEIGHT;
+        this.add_floor(floor_data, this.top_floor_y);
+        this.top_floor_y -= this.FLOOR_HEIGHT;
     }
-    this.y_position = -this.FLOOR_HEIGHT;
+    this.top_floor_y = -this.FLOOR_HEIGHT;
 
     this.layer.add(this.player);
-    this.player.position(GAME_WIDTH_HALF - (this.PLAYER_WIDTH >> 1), GAME_HEIGHT - this.PLAYER_HEIGHT - 80);
-    this.player.last_y = this.player.y;
+    this.player.position(GAME_WIDTH_HALF - (this.PLAYER_WIDTH >> 1), (nFloors * this.FLOOR_HEIGHT) - this.FLOOR_HEIGHT - this.PLAYER_HEIGHT);
+    this.player.START_Y = this.player.y;
 
     this.player.setAnimation(this.player.anims[STATE_RUNNING | DIR_LEFT]);
     this.player.vx = -this.PLAYER_SPEED;
@@ -218,7 +213,7 @@ game_scene.spawn_floor = function () {
     return floor_data;
 }
 
-game_scene.add_floor = function (floor_data, y_position) {
+game_scene.add_floor = function (floor_data, top_floor_y) {
     let floor = [];
     let tag = 'floor';
     switch (floor_data.bg) {
@@ -235,7 +230,7 @@ game_scene.add_floor = function (floor_data, y_position) {
 
     let bg = new MiImage(this.getImage(tag));
     this.layer.add(bg);
-    bg.position(0, y_position);
+    bg.position(0, top_floor_y);
     floor.push(bg);
 
     for (let i = 0; i < floor_data.entities.length; i++) {
@@ -244,7 +239,7 @@ game_scene.add_floor = function (floor_data, y_position) {
             case TYPE_LADDER:
                 let ladder = new MiSprite(game_scene.getImage('ladder'), this.LADDER_WIDTH, this.LADDER_HEIGHT);
                 this.layer.add(ladder);
-                ladder.position(entity.x, y_position - (this.LADDER_HEIGHT - this.FLOOR_HEIGHT));
+                ladder.position(entity.x, top_floor_y - (this.LADDER_HEIGHT - this.FLOOR_HEIGHT));
                 ladder.setCollider(0, 0, this.LADDER_WIDTH, this.LADDER_HEIGHT);
                 ladder.hasCollided = false;
                 ladder.update = game_scene.update_ladder;
@@ -259,14 +254,16 @@ game_scene.update_ladder = function () {
     if (!this.hasCollided && this.collidesWith(game_scene.player)) {
         this.hasCollided = true;
         let player = game_scene.player;
+        game_scene.last_layer_y = game_scene.layer.y;
         player.lastdir = game_scene.player.dir;
         player.dir = DIR_UP;
         player.vx = 0;
         player.vy = -game_scene.PLAYER_SPEED;
         player.distance_to_climb = game_scene.FLOOR_HEIGHT;
+        player.scroll_remain = 0;
         if (player.jumping) {
             player.jumping = false;
-            player.distance_to_climb -= (player.last_y - Math.floor(player.y));
+            player.distance_to_climb -= (player.START_Y - Math.floor(player.y));
             player.scroll_remain = game_scene.FLOOR_HEIGHT - player.distance_to_climb;
         }
     }
