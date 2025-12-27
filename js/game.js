@@ -35,7 +35,8 @@ game_scene.create = function () {
     this.PLAYER_WIDTH = 18;
     this.PLAYER_HEIGHT = 22;
     this.PLAYER_SPEED = 2;
-
+    this.PLAYER_JUMP_IMPULSE = -4;
+    this.PLAYER_JUMP_GRAVITY = 0.4;
 
     this.player = new MiSprite(this.getImage('player'), this.PLAYER_WIDTH, this.PLAYER_HEIGHT);
     this.player.setCollider(4, 5, 10, 17);
@@ -71,9 +72,24 @@ game_scene.create = function () {
 game_scene.player_update = function () {
     this.animate();
     this.move(this.vx, this.vy);
+    if (this.jumping) {
+        this.vy += game_scene.PLAYER_JUMP_GRAVITY;
+        if (this.y >= this.last_y) {
+            this.y = this.last_y;
+            this.vy = 0;
+            this.jumping = false;
+        }
+    }
+
     if (this.dir === DIR_UP) {
         this.distance_to_climb -= game_scene.PLAYER_SPEED;
         if (this.distance_to_climb <= 0) {
+            if (this.scroll_remain > 0) {
+                // let scroll_amount = Math.min(this.scroll_remain, game_scene.PLAYER_SPEED);
+                game_scene.layer.move(0, this.scroll_remain);
+                game_scene.y_position += this.scroll_remain;
+                this.scroll_remain = 0;
+            }
             this.dir = this.lastdir;
             this.vy = 0;
             if (this.dir === DIR_LEFT) {
@@ -88,7 +104,8 @@ game_scene.player_update = function () {
 
         if (game_scene.y_position >= 0) {
             game_scene.remove_floor();
-            game_scene.spawn_floor({ bg: 1, entities: [{ type: TYPE_LADDER, x: 140, y: 0 }] }, -game_scene.FLOOR_HEIGHT);
+            let new_floor = game_scene.spawn_floor();
+            game_scene.add_floor(new_floor, -game_scene.FLOOR_HEIGHT);
             game_scene.y_position -= game_scene.FLOOR_HEIGHT;
             game_scene.layer.remove(game_scene.player);
             game_scene.layer.add(game_scene.player);
@@ -124,45 +141,84 @@ game_scene.start = function () {
 
     this.floors = [];
     this.y_position = GAME_HEIGHT - 32
-    for (let i = 0; i < this.map.length; i++) {
-        this.spawn_floor(this.map[i], this.y_position);
+    this.ladder_dir = DIR_NONE;
+
+    this.add_floor({ bg: 0, entities: [] }, this.y_position);
+    this.y_position -= this.FLOOR_HEIGHT;
+    this.add_floor({ bg: 1, entities: [] }, this.y_position);
+    this.y_position -= this.FLOOR_HEIGHT;
+
+    for (let i = 0; i < 6; i++) {
+        let floor_data = this.spawn_floor();
+        this.add_floor(floor_data, this.y_position);
         this.y_position -= this.FLOOR_HEIGHT;
     }
     this.y_position = -this.FLOOR_HEIGHT;
 
     this.layer.add(this.player);
     this.player.position(GAME_WIDTH_HALF - (this.PLAYER_WIDTH >> 1), GAME_HEIGHT - this.PLAYER_HEIGHT - 80);
+    this.player.last_y = this.player.y;
 
     this.player.setAnimation(this.player.anims[STATE_RUNNING | DIR_LEFT]);
     this.player.vx = -this.PLAYER_SPEED;
     this.player.dir = DIR_LEFT;
+    this.player.jumping = false;
 }
 
-// game_scene.keyDown = function (event) {
-//     // console.log(event.key + " " + event.code);
-//     switch (event.key) {
-//         case 'PageUp':
-//             this.layer.move(0, -16);
-//             break;
-//         case 'PageDown':
-//             this.layer.move(0, 16);
-//             this.y_position += 16;
-//             if (this.y_position >= 0) {
-//                 this.remove_floor();
-//                 this.spawn_floor({ bg: 1, entities: [] }, -this.FLOOR_HEIGHT);
-//                 this.y_position -= this.FLOOR_HEIGHT;
-//                 // console.log("Spawn new floor " + this.y_position);
-//             }
-//             break;
-//     }
-// }
+game_scene.keyDown = function (event) {
+    console.log(event.key + " " + event.code);
+    switch (event.code) {
+        case 'Space':
+            this.jump();
+            break;
+    }
+}
+
+game_scene.touchStart = function (x, y) {
+    this.jump();
+}
+
+game_scene.jump = function () {
+    if (!this.player.jumping) {
+        this.player.vy = this.PLAYER_JUMP_IMPULSE;
+        this.player.jumping = true;
+    }
+}
 
 game_scene.remove_floor = function () {
     let removed_tile = this.floors.shift();
     this.layer.remove(removed_tile);
 }
 
-game_scene.spawn_floor = function (floor_data, y_position) {
+game_scene.spawn_floor = function () {
+    let floor_data = {
+        bg: 2,
+        entities: []
+    }
+    let x = 8;
+    switch (this.ladder_dir) {
+        case DIR_NONE:
+            this.ladder_dir = Math.floor(Math.random() * 2) + 1;
+            if (this.ladder_dir === DIR_RIGHT) {
+                x = 140;
+            }
+            break;
+        case DIR_LEFT:
+            this.ladder_dir = DIR_RIGHT;
+            x = 140;
+            break;
+        case DIR_RIGHT:
+            this.ladder_dir = DIR_LEFT;
+            x = 8;
+            break;
+    }
+    let ladder = { type: TYPE_LADDER, x: x, y: 0 };
+    floor_data.entities.push(ladder);
+
+    return floor_data;
+}
+
+game_scene.add_floor = function (floor_data, y_position) {
     let floor = [];
     let tag = 'floor';
     switch (floor_data.bg) {
@@ -202,10 +258,16 @@ game_scene.spawn_floor = function (floor_data, y_position) {
 game_scene.update_ladder = function () {
     if (!this.hasCollided && this.collidesWith(game_scene.player)) {
         this.hasCollided = true;
-        game_scene.player.lastdir = game_scene.player.dir;
-        game_scene.player.dir = DIR_UP;
-        game_scene.player.vx = 0;
-        game_scene.player.vy = -game_scene.PLAYER_SPEED;
-        game_scene.player.distance_to_climb = game_scene.FLOOR_HEIGHT;
+        let player = game_scene.player;
+        player.lastdir = game_scene.player.dir;
+        player.dir = DIR_UP;
+        player.vx = 0;
+        player.vy = -game_scene.PLAYER_SPEED;
+        player.distance_to_climb = game_scene.FLOOR_HEIGHT;
+        if (player.jumping) {
+            player.jumping = false;
+            player.distance_to_climb -= (player.last_y - Math.floor(player.y));
+            player.scroll_remain = game_scene.FLOOR_HEIGHT - player.distance_to_climb;
+        }
     }
 }
